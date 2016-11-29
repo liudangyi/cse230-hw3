@@ -43,7 +43,7 @@ import Control.Monad (forM, forM_)
 import Data.List (transpose, intercalate)
 
 
-quickCheckN n = quickCheckWith $ stdArgs { maxSuccess = n}
+quickCheckN n = quickCheckWith $ stdArgs { maxSuccess = n }
 
 -- Problem 0: All About You
 -- ========================
@@ -51,9 +51,9 @@ quickCheckN n = quickCheckWith $ stdArgs { maxSuccess = n}
 -- Tell us your name, email and student ID, by replacing the respective
 -- strings below
 
-myName  = "Write Your Name  Here"
-myEmail = "Write Your Email Here"
-mySID   = "Write Your SID   Here"
+myName  = "Dangyi Liu"
+myEmail = "dangyi@ucsd.edu"
+mySID   = "A53221859"
 
 
 
@@ -128,8 +128,47 @@ data Statement =
 
 -- Write a function
 
+evalOp :: Bop -> Value -> Value -> Value
+evalOp op (IntVal i) (IntVal j) = case op of
+                                    Plus   -> IntVal  (i + j)
+                                    Minus  -> IntVal  (i - j)
+                                    Times  -> IntVal  (i * j)
+                                    Divide -> IntVal  (i `div` j)
+                                    Gt     -> BoolVal (i > j)
+                                    Ge     -> BoolVal (i >= j)
+                                    Lt     -> BoolVal (i < j)
+                                    Le     -> BoolVal (i <= j)
+
+evalE :: (MonadState Store m, MonadError Value m, MonadWriter String m) => Expression -> m Value
+evalE (Var x)      = do s <- get
+                        case Map.lookup x s of
+                          Nothing -> return $ IntVal 0
+                          Just v  -> return v
+evalE (Val v)      = return v
+evalE (Op o e1 e2) = do v1 <- evalE e1
+                        v2 <- evalE e2
+                        return $ evalOp o v1 v2
+
 evalS :: (MonadState Store m, MonadError Value m, MonadWriter String m) => Statement -> m ()
-evalS = error "TODO"
+evalS (Assign x e)     = do v <- evalE e
+                            s <- get
+                            put (Map.insert x v s)
+evalS w@(While e s)    = evalS (If e (Sequence s w) Skip)
+evalS Skip             = return ()
+evalS (Sequence s1 s2) = do evalS s1
+                            evalS s2
+evalS (If e s1 s2)     = do v <- evalE e
+                            case v of
+                              BoolVal True  -> evalS s1
+                              BoolVal False -> evalS s2
+                              _             -> return ()
+evalS (Print s e)      = do v <- evalE e
+                            tell $ s ++ show v
+evalS (Throw e)        = do v <- evalE e
+                            throwError v
+evalS (Try s x h)      = evalS s `catchError` handler
+      where handler v  = do evalS (Assign x (Val v))
+                            evalS h
 
 -- Next, we will implement a *concrete instance* of a monad `m` that
 -- satisfies the above conditions, by filling in a suitable definition:
@@ -139,7 +178,7 @@ type Eval a = ErrorT Value (WriterT String (State Store)) a
 -- Now, we implement a function to *run* the action from a given store:
 
 runEval :: Eval a -> Store -> ((Either Value a, String), Store)
-runEval act sto = error "TODO"
+runEval act sto = runState (runWriterT (runErrorT act)) sto
 
 -- When you are done, you will get an implementation:
 
@@ -311,7 +350,11 @@ genBSTop  = frequency [(5, genBSTadd), (1, genBSTdel)]
 -- Write an insertion function
 
 bstInsert :: (Ord k) => k -> v -> BST k v -> BST k v
-bstInsert = error "TBD"
+bstInsert k' v' Emp = Bind k' v' Emp Emp
+bstInsert k' v' (Bind k v l r)
+  | k' < k  = balanced $ Bind k v (bstInsert k' v' l) r
+  | k' > k  = balanced $ Bind k v l (bstInsert k' v' r)
+  | k' == k = Bind k v' l r
 
 -- such that `bstInsert k v t` inserts a key `k` with value
 -- `v` into the tree `t`. If `k` already exists in the input
@@ -331,7 +374,13 @@ prop_insert_map = forAll (listOf genBSTadd) $ \ops ->
 -- Write a deletion function for BSTs of this type:
 
 bstDelete :: (Ord k) => k -> BST k v -> BST k v
-bstDelete k t = error "TBD"
+bstDelete _ Emp  = Emp
+bstDelete k' (Bind k v l r)
+  | k' < k  = balanced $ Bind k v (bstDelete k' l) r
+  | k' > k  = balanced $ Bind k v l (bstDelete k' r)
+  | k' == k = balanced $ insertLeftMost l r
+    where insertLeftMost x Emp            = x
+          insertLeftMost x (Bind k v l r) = Bind k v (insertLeftMost x l) r
 
 -- such that `bstDelete k t` removes the key `k` from the tree `t`.
 -- If `k` is absent from the input tree, then the tree is returned
@@ -362,7 +411,19 @@ isBal Emp            = True
 -- Write a balanced tree generator
 
 genBal :: Gen (BST Int Char)
-genBal = error "TBD"
+genBal = do ks <- sublistOf keys
+            genBalWithKeys ks
+
+genBalWithKeys :: [Int] -> Gen (BST Int Char)
+genBalWithKeys []   = return Emp
+genBalWithKeys ks = do let n     = length ks `div` 2
+                           left  = take n ks
+                           right = drop (n + 1) ks
+                           key   = ks !! n
+                       leftTree  <- genBalWithKeys left
+                       rightTree <- genBalWithKeys right
+                       value     <- elements ['a'..'z']
+                       return $ Bind key value leftTree rightTree
 
 -- such that
 
@@ -380,10 +441,25 @@ prop_insert_bal = forAll (listOf genBSTadd) $ isBal . ofBSTops
 prop_delete_bal ::  Property
 prop_delete_bal = forAll (listOf genBSTop) $ isBal . ofBSTops
 
+balanced :: BST k v -> BST k v
+balanced = fst . balancedH
 
+balancedH :: BST k v -> (BST k v, Int)
+balancedH Emp   = (Emp, 0)
+balancedH (Bind k v l' r')
+  | lh > rh + 1 = balancedH $ rotateRight (Bind k v (rotateLeft l) r)
+  | rh > lh + 1 = balancedH $ rotateLeft  (Bind k v l (rotateLeft r))
+  | otherwise   = (Bind k v l r, max lh rh + 1)
+  where (l, lh) = balancedH l'
+        (r, rh) = balancedH r'
 
+rotateLeft :: BST k v -> BST k v
+rotateLeft (Bind k v l (Bind rk rv rl rr)) = Bind rk rv (Bind k v l rl) rr
+rotateLeft t = t
 
-
+rotateRight :: BST k v -> BST k v
+rotateRight (Bind k v (Bind lk lv ll lr) r) = Bind lk lv ll (Bind k v lr r)
+rotateRight t = t
 
 -- Problem 3: Circuit Testing
 -- ==========================
