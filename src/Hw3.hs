@@ -713,15 +713,27 @@ prop_Adder_Correct l1 l2 =
 -- yield zero.
 
 prop_bitSubtractor_Correct ::  Signal -> [Bool] -> Bool
-prop_bitSubtractor_Correct = error "TODO"
+prop_bitSubtractor_Correct bin xs =
+  case binary xs of
+    0 -> binary (sampleN out) == 0 && sample1 bout == sample1 bin
+    x -> binary (sampleN out) == x - binary (sample1 bin)
+  where (out, bout) = bitSubtractor (bin, map lift0 xs)
 
 -- 2. Using the `bitAdder` circuit as a model, deﬁne a `bitSubtractor`
 -- circuit that implements this functionality and use QC to check that
 -- your behaves correctly.
 
 bitSubtractor :: (Signal, [Signal]) -> ([Signal], Signal)
-bitSubtractor = error "TODO"
+bitSubtractor (bin, [])   = ([], bin)
+bitSubtractor (bin, x:xs) = (r':rs, bout)
+  where (r, b)     = halfsub (x, bin)
+        (rs, bout) = bitSubtractor (b, xs)
+        r'         = and2 (r, xor2 (bout, high))
 
+halfsub :: (Signal, Signal) -> (Signal, Signal)
+halfsub (x, y) = (diff, bout)
+  where diff  = xor2 (x, y)
+        bout  = and2 (xor2 (x, high), y)
 
 -- Problem: Multiplication
 -- -----------------------
@@ -731,7 +743,9 @@ bitSubtractor = error "TODO"
 -- width as input and outputs their product.
 
 prop_Multiplier_Correct ::  [Bool] -> [Bool] -> Bool
-prop_Multiplier_Correct = error "TODO"
+prop_Multiplier_Correct l1 l2 =
+  binary (sampleN prod) == binary l1 * binary l2
+  where prod = multiplier (map lift0 l1, map lift0 l2)
 
 -- 4. Deﬁne a `multiplier` circuit and check that it satisﬁes your
 -- speciﬁcation. (Looking at how adder is deﬁned will help with this,
@@ -740,6 +754,10 @@ prop_Multiplier_Correct = error "TODO"
 -- binary numbers on paper.)
 
 multiplier :: ([Signal], [Signal]) -> [Signal]
-multiplier = error "TODO"
+multiplier (_, []) = []
+multiplier ([], _) = []
+multiplier (xs, ys@(y:yy)) = take resultbits $ adder (xsy, low:multiplier (xs, yy))
+   where (xsy, dump) = demuxN (xs, y)
+         resultbits = length xs + length ys
 
 -- [1]: http://www.cis.upenn.edu/~bcpierce/courses/552-2008/resources/circuits.hs
